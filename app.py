@@ -12,111 +12,127 @@ from sentence_transformers import SentenceTransformer
 import faiss
 import os
 
-# 1. Advanced Configuration & CSS
-st.set_page_config(page_title="NCERT Neural Engine", page_icon="🧬", layout="wide")
-st.markdown("<style>.stApp { background: #05070a; color: #00ffcc; }</style>", unsafe_allow_html=True)
+# 1. PAGE CONFIG & NEON THEME
+st.set_page_config(page_title="Omni-NCERT Neural Engine", page_icon="🧬", layout="wide")
 
-# 2. Resource Initialization (The "Heavies")
+st.markdown("""
+    <style>
+    .stApp { background: #05070a; color: #e0e6ed; }
+    h1 { background: linear-gradient(90deg, #00ffcc, #0088ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; }
+    .stButton>button { background: #161b22; border: 1px solid #00ffcc; color: #00ffcc; border-radius: 8px; width: 100%; }
+    .stChatMessage { border: 1px solid #1f2937; border-radius: 15px; margin-bottom: 10px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# 2. ENGINES INITIALIZATION
 if "GROQ_API_KEY" not in st.secrets:
-    st.error("🔑 Critical Error: GROQ_API_KEY not found.")
+    st.error("🔑 GROQ_API_KEY missing in Secrets!")
     st.stop()
 
 @st.cache_resource
-def load_neural_assets():
+def load_assets():
     client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-    # Local Embedding Model for RAG (Zero-cost, High-speed)
     embedder = SentenceTransformer('all-MiniLM-L6-v2')
     return client, embedder
 
-client, embedder = load_neural_assets()
+client, embedder = load_assets()
 
-# 3. Persistent Neural Memory (RAG State)
-if "vector_db" not in st.session_state:
-    st.session_state.vector_db = None
-    st.session_state.kb_content = [] # Knowledge Base chunks
+# 3. SESSION STATE (History & RAG)
 if "chats" not in st.session_state:
-    st.session_state.chats = {str(uuid.uuid4()): {"title": "Main Brain", "messages": [], "pinned": False}}
-    st.session_state.current_chat_id = list(st.session_state.chats.keys())[0]
+    st.session_state.chats = {str(uuid.uuid4()): {"messages": [], "db": None, "chunks": []}}
+    st.session_state.active_id = list(st.session_state.chats.keys())[0]
 
-# --- SIDEBAR: KNOWLEDGE INDEXING ---
+# --- SIDEBAR: KNOWLEDGE INDEX & HISTORY ---
 with st.sidebar:
-    st.title("🧬 Neural Index")
-    uploaded_files = st.file_uploader("Upload NCERT Books (PDF/IMG)", accept_multiple_files=True)
+    st.title("🧬 Neural Archive")
     
-    if st.button("🏗️ Build Knowledge Base") and uploaded_files:
-        raw_text = ""
-        for f in uploaded_files:
-            if f.type == "application/pdf":
-                pdf = PyPDF2.PdfReader(f)
-                raw_text += "\n".join([p.extract_text() for p in pdf.pages])
-            else:
-                raw_text += pytesseract.image_to_string(Image.open(f))
-        
-        # Semantic Chunking
-        chunks = [raw_text[i:i+500] for i in range(0, len(raw_text), 500)]
-        st.session_state.kb_content = chunks
-        
-        # Embedding & FAISS Indexing
-        embeddings = embedder.encode(chunks)
-        dimension = embeddings.shape[1]
-        index = faiss.IndexFlatL2(dimension)
-        index.add(np.array(embeddings).astype('float32'))
-        st.session_state.vector_db = index
-        st.success(f"Indexed {len(chunks)} Knowledge Chunks!")
+    # PDF/Image Uploader
+    uploaded_files = st.file_uploader("📂 Upload NCERT Docs", type=["pdf", "png", "jpg"], accept_multiple_files=True)
+    if st.button("🏗️ Index Knowledge") and uploaded_files:
+        with st.spinner("Analyzing..."):
+            raw_text = ""
+            for f in uploaded_files:
+                if f.type == "application/pdf":
+                    pdf = PyPDF2.PdfReader(f)
+                    raw_text += "\n".join([p.extract_text() for p in pdf.pages])
+                else:
+                    raw_text += pytesseract.image_to_string(Image.open(f))
+            
+            chunks = [raw_text[i:i+600] for i in range(0, len(raw_text), 600)]
+            embeddings = embedder.encode(chunks)
+            index = faiss.IndexFlatL2(embeddings.shape[1])
+            index.add(np.array(embeddings).astype('float32'))
+            
+            st.session_state.chats[st.session_state.active_id]["db"] = index
+            st.session_state.chats[st.session_state.active_id]["chunks"] = chunks
+            st.success("Indexing Complete!")
 
-# --- MAIN ENGINE ---
-curr_id = st.session_state.current_chat_id
-history = st.session_state.chats[curr_id]["messages"]
+    st.divider()
+    
+    # Download Chat History
+    history_text = ""
+    for m in st.session_state.chats[st.session_state.active_id]["messages"]:
+        history_text += f"{m['role'].upper()}: {m['content']}\n\n"
+    
+    st.download_button(
+        label="💾 Download This Session",
+        data=history_text,
+        file_name=f"ncert_session_{st.session_state.active_id[:8]}.txt",
+        mime="text/plain"
+    )
 
-tab_chat, tab_lab = st.tabs(["💬 Neural Chat (RAG)", "🧪 Visual Simulation Lab"])
+# --- MAIN INTERFACE ---
+st.title("Omni-NCERT Neural Engine")
+
+tab_chat, tab_lab = st.tabs(["💬 AI Tutor Console", "📊 Visual Lab"])
 
 with tab_chat:
-    for msg in history:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    active_chat = st.session_state.chats[st.session_state.active_id]
+    
+    for m in active_chat["messages"]:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
 
-    if prompt := st.chat_input("Query the NCERT Neural Base..."):
+    if prompt := st.chat_input("Ask about Math, Physics, or Chemistry..."):
+        active_chat["messages"].append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-        
-        # RAG RETRIEVAL STEP
-        context = ""
-        if st.session_state.vector_db:
-            q_emb = embedder.encode([prompt])
-            D, I = st.session_state.vector_db.search(np.array(q_emb).astype('float32'), k=3)
-            context = "\n".join([st.session_state.kb_content[i] for i in I[0]])
 
-        # INFERENCE
-        system_prompt = f"""You are a Neural NCERT Tutor. Use this retrieved context if relevant:
-        <context>{context}</context>
-        Rules: 
-        1. Always use step-by-step logic for Class 6-12.
-        2. Use LaTeX for math ($$).
-        3. If the context contains specific textbook data, prioritize it."""
-        
-        history.append({"role": "user", "content": prompt})
+        # RAG Search
+        context = ""
+        if active_chat["db"]:
+            q_emb = embedder.encode([prompt])
+            _, I = active_chat["db"].search(np.array(q_emb).astype('float32'), k=3)
+            context = "\n".join([active_chat["chunks"][i] for i in I[0]])
+
+        # Llama 3.3-70B reasoning
+        sys_msg = f"You are a Senior NCERT Tutor. Context: {context}. Use LaTeX $$ for math and chemical formulas."
         try:
             res = client.chat.completions.create(
-                model="llama-3.2-11b-vision-preview",
-                messages=[{"role": "system", "content": system_prompt}] + history,
-                temperature=0.1
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": sys_msg}] + active_chat["messages"],
+                temperature=0.2
             )
             ans = res.choices[0].message.content
+            active_chat["messages"].append({"role": "assistant", "content": ans})
             with st.chat_message("assistant"):
                 st.markdown(ans)
-            history.append({"role": "assistant", "content": ans})
         except Exception as e:
-            st.error(f"Brain Sync Error: {e}")
+            st.error(f"Error: {e}")
 
 with tab_lab:
-    st.header("📉 Physics & Math Real-Time Simulator")
-    sim = st.selectbox("Select Simulation", ["Projectile Motion", "Acid-Base Titration", "Ohm's Law"])
+    st.header("📉 Physics & Math Simulator")
+    sim = st.selectbox("Experiment", ["Projectile Motion", "Ice Cream Sales (Linear)"])
     
     if sim == "Projectile Motion":
-        v0 = st.slider("Initial Velocity (m/s)", 1, 100, 50)
-        angle = st.slider("Angle (°)", 0, 90, 45)
-        t_max = (2 * v0 * np.sin(np.radians(angle))) / 9.8
-        t_range = np.linspace(0, t_max, 100)
-        x = v0 * t_range * np.cos(np.radians(angle))
-        y = v0 * t_range * np.sin(np.radians(angle)) - 0.5 * 9.8 * t_range**2
-        st.line_chart(pd.DataFrame({"Range (m)": x, "Height (m)": y}), x="Range (m)", y=
+        v = st.slider("Velocity", 10, 100, 50)
+        a = st.slider("Angle", 10, 80, 45)
+        t_m = (2 * v * np.sin(np.radians(a))) / 9.8
+        tr = np.linspace(0, t_m, 100)
+        x = v * tr * np.cos(np.radians(a)); y = v * tr * np.sin(np.radians(a)) - 0.5 * 9.8 * tr**2
+        st.line_chart(pd.DataFrame({"Range (m)": x, "Height (m)": y}), x="Range (m)", y="Height (m)")
+        
+    elif sim == "Ice Cream Sales (Linear)":
+        temp = np.linspace(15, 45, 100)
+        sales = 15 * temp + 50
+        st.line_chart(pd.DataFrame({"Temp (°C)": temp, "Sales ($)": sales}), x="Temp (°C)", y="Sales ($)")
