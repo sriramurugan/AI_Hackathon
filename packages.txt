@@ -1,1 +1,2 @@
-text tesseract-ocr libtesseract-dev
+tesseract-ocr
+libtesseract-dev
