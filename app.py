@@ -4,36 +4,30 @@ import numpy as np
 import pandas as pd
 import uuid
 import urllib.parse
+import plotly.graph_objects as go
 from PIL import Image
 import pytesseract
 import PyPDF2
 from sentence_transformers import SentenceTransformer
 import faiss
 
-# 1. PAGE CONFIG & ENHANCED CSS
+# 1. PAGE CONFIG & NEON THEME
 st.set_page_config(page_title="Omni-NCERT Neural Engine", page_icon="🧬", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background: #05070a; color: #e0e6ed; }
     h1 { background: linear-gradient(90deg, #00ffcc, #0088ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; }
-    
-    /* Sidebar Session Cards */
-    .session-card {
-        padding: 10px; background: #161b22; border-radius: 8px; 
-        border: 1px solid #30363d; margin-bottom: 10px; cursor: pointer;
-    }
-    
-    /* Action Buttons Styling */
-    .chat-actions { display: flex; gap: 10px; margin-top: 5px; font-size: 0.8rem; }
-    .action-link { color: #00ffcc !important; text-decoration: none !important; border: 1px solid #00ffcc; padding: 2px 8px; border-radius: 5px; }
-    .action-link:hover { background: rgba(0, 255, 204, 0.1); }
+    .stButton>button { background: #161b22; border: 1px solid #00ffcc; color: #00ffcc; border-radius: 8px; width: 100%; }
+    .stChatMessage { border: 1px solid #1f2937; border-radius: 15px; margin-bottom: 10px; background: #0d1117; }
+    .action-link { color: #00ffcc !important; text-decoration: none !important; border: 1px solid #00ffcc; padding: 4px 10px; border-radius: 5px; font-size: 0.8rem; }
+    section[data-testid="stSidebar"] { background-color: #0d1117 !important; border-right: 1px solid #1f2937; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. ENGINES & ASSETS
+# 2. ENGINES INITIALIZATION
 if "GROQ_API_KEY" not in st.secrets:
-    st.error("🔑 GROQ_API_KEY missing!")
+    st.error("🔑 GROQ_API_KEY missing in Secrets!")
     st.stop()
 
 @st.cache_resource
@@ -44,9 +38,8 @@ def load_assets():
 
 client, embedder = load_assets()
 
-# 3. GLOBAL STATE: MULTI-CHAT HISTORY
+# 3. GLOBAL STATE: MULTI-CHAT HISTORY & DEFENSIVE LOADING
 if "chats" not in st.session_state:
-    # Key: chat_id, Value: {title, messages, db, chunks}
     st.session_state.chats = {}
 
 if "active_id" not in st.session_state:
@@ -54,29 +47,31 @@ if "active_id" not in st.session_state:
     st.session_state.chats[first_id] = {"title": "Main Brain", "messages": [], "db": None, "chunks": []}
     st.session_state.active_id = first_id
 
+# Fix for potential KeyErrors during version updates
+for cid in st.session_state.chats:
+    if "title" not in st.session_state.chats[cid]: st.session_state.chats[cid]["title"] = "Study Session"
+
 # --- SIDEBAR: NAVIGATION & INDEXING ---
 with st.sidebar:
-    st.title("🧬 Neural Hub")
+    st.title("🧬 Neural Archive")
     
-    if st.button("➕ Start New Session", use_container_width=True):
+    if st.button("➕ New Study Session", use_container_width=True):
         new_id = str(uuid.uuid4())
         st.session_state.chats[new_id] = {"title": "New Session", "messages": [], "db": None, "chunks": []}
         st.session_state.active_id = new_id
         st.rerun()
 
     st.divider()
-    st.subheader("📚 Chat History")
+    st.subheader("📚 History")
     for chat_id, chat_data in st.session_state.chats.items():
-        # Display session buttons
-        label = chat_data["title"] if chat_data["messages"] else "Empty Session"
-        if st.button(f"🗨️ {label[:20]}...", key=chat_id, use_container_width=True):
+        if st.button(f"🗨️ {chat_data['title'][:20]}", key=chat_id, use_container_width=True):
             st.session_state.active_id = chat_id
             st.rerun()
 
     st.divider()
-    uploaded_files = st.file_uploader("📂 Upload NCERT Docs", type=["pdf", "png", "jpg"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("📂 Upload NCERT (PDF/IMG)", type=["pdf", "png", "jpg"], accept_multiple_files=True)
     if st.button("🏗️ Index Knowledge") and uploaded_files:
-        with st.spinner("Analyzing..."):
+        with st.spinner("Analyzing Content..."):
             raw_text = ""
             for f in uploaded_files:
                 if f.type == "application/pdf":
@@ -92,7 +87,7 @@ with st.sidebar:
             
             st.session_state.chats[st.session_state.active_id]["db"] = index
             st.session_state.chats[st.session_state.active_id]["chunks"] = chunks
-            st.success("Indexed!")
+            st.success("Indexed Successfully!")
 
 # --- MAIN INTERFACE ---
 aid = st.session_state.active_id
@@ -100,68 +95,68 @@ active_chat = st.session_state.chats[aid]
 
 st.title("Omni-NCERT Neural Engine")
 
-tab_chat, tab_lab = st.tabs(["💬 AI Tutor Console", "📊 Visual Lab"])
+tab_chat, tab_lab = st.tabs(["💬 AI Tutor Console", "📊 Pro Visual Lab"])
 
 with tab_chat:
-    # 1. Display historical messages with actions
+    # Display messages
     for idx, m in enumerate(active_chat["messages"]):
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
-            
             if m["role"] == "assistant":
-                # Create encoded WhatsApp link
-                wa_msg = urllib.parse.quote(f"Check out this NCERT Solution: \n\n{m['content'][:500]}...")
+                wa_msg = urllib.parse.quote(f"NCERT Solution:\n{m['content'][:500]}")
                 wa_url = f"https://wa.me/?text={wa_msg}"
-                
-                # Action Buttons Row
-                cols = st.columns([0.2, 0.2, 0.2, 0.4])
-                with cols[0]: st.button("👍", key=f"like_{idx}_{aid}")
-                with cols[1]: st.button("👎", key=f"dis_{idx}_{aid}")
-                with cols[2]: st.markdown(f'<a href="{wa_url}" target="_blank" class="action-link">📲 Share</a>', unsafe_allow_html=True)
-                with cols[3]: st.code(m["content"][:20] + "...", language="text") # Click code to copy
+                cols = st.columns([0.15, 0.15, 0.2, 0.5])
+                cols[0].button("👍", key=f"l_{idx}_{aid}")
+                cols[1].button("👎", key=f"d_{idx}_{aid}")
+                cols[2].markdown(f'<a href="{wa_url}" target="_blank" class="action-link">📲 Share</a>', unsafe_allow_html=True)
 
-    # 2. Chat Input Logic
-    if prompt := st.chat_input("Ask a question..."):
-        # Set chat title based on first question
-        if not active_chat["messages"]:
-            active_chat["title"] = prompt[:25]
-
+    if prompt := st.chat_input("Ask any Class 6-12 question..."):
+        if not active_chat["messages"]: active_chat["title"] = prompt[:25]
         active_chat["messages"].append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        with st.chat_message("user"): st.markdown(prompt)
 
-        # RAG Search
+        # RAG Logic
         context = ""
         if active_chat["db"]:
             q_emb = embedder.encode([prompt])
             _, I = active_chat["db"].search(np.array(q_emb).astype('float32'), k=3)
             context = "\n".join([active_chat["chunks"][i] for i in I[0]])
 
-        # Llama 3.3-70B reasoning
-        sys_msg = f"You are a Senior NCERT Tutor. Context: {context}. Use LaTeX $$ for math and chemical formulas."
         try:
             res = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": sys_msg}] + active_chat["messages"],
+                messages=[{"role": "system", "content": f"You are a Senior NCERT Tutor. Context: {context}. Use LaTeX $$."}] + active_chat["messages"],
                 temperature=0.2
             )
             ans = res.choices[0].message.content
             active_chat["messages"].append({"role": "assistant", "content": ans})
-            st.rerun() # Refresh to show assistant message with action buttons
+            st.rerun()
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Brain Sync Error: {e}")
 
 with tab_lab:
-    st.header("📉 Physics & Math Simulator")
-    sim = st.selectbox("Experiment", ["Projectile Motion", "Ice Cream Sales (Linear)"])
+    st.header("🔬 High-Fidelity Neural Lab")
+    sim = st.selectbox("Simulation", ["Projectile Motion", "Ice Cream Sales (Linear)", "Ohm's Law"])
+    fig = go.Figure()
+
     if sim == "Projectile Motion":
-        v = st.slider("Velocity", 10, 100, 50)
-        a = st.slider("Angle", 10, 80, 45)
-        t_m = (2 * v * np.sin(np.radians(a))) / 9.8
-        tr = np.linspace(0, t_m, 100)
-        x = v * tr * np.cos(np.radians(a)); y = v * tr * np.sin(np.radians(a)) - 0.5 * 9.8 * tr**2
-        st.line_chart(pd.DataFrame({"Range (m)": x, "Height (m)": y}), x="Range (m)", y="Height (m)")
+        v0 = st.slider("u (m/s)", 10, 100, 50); angle = st.slider("Angle (°)", 10, 80, 45)
+        t_f = (2 * v0 * np.sin(np.radians(angle))) / 9.8
+        t = np.linspace(0, t_f, 100)
+        x = v0 * t * np.cos(np.radians(angle)); y = v0 * t * np.sin(np.radians(angle)) - 0.5 * 9.8 * t**2
+        fig.add_trace(go.Scatter(x=x, y=y, mode='lines', line=dict(color='#00ffcc', width=4)))
+        fig.update_layout(title="Trajectory Path", xaxis_title="Range (m)", yaxis_title="Height (m)", template="plotly_dark")
+
     elif sim == "Ice Cream Sales (Linear)":
-        temp = np.linspace(15, 45, 100)
-        sales = 15 * temp + 50
-        st.line_chart(pd.DataFrame({"Temp (°C)": temp, "Sales ($)": sales}), x="Temp (°C)", y="Sales ($)")
+        m = st.number_input("Slope (m)", value=15); c = st.number_input("Intercept (c)", value=50)
+        temp = np.linspace(10, 50, 100); sales = m * temp + c
+        fig.add_trace(go.Scatter(x=temp, y=sales, mode='lines+markers', line=dict(color='#0088ff')))
+        fig.update_layout(title="Linear Equation: y = mx + c", xaxis_title="Temp (°C)", yaxis_title="Sales ($)", template="plotly_dark")
+
+    elif sim == "Ohm's Law":
+        r = st.select_slider("R (Ω)", options=[10, 20, 50, 100])
+        v = np.linspace(0, 12, 50); i = v / r
+        fig.add_trace(go.Scatter(x=v, y=i, mode='lines', fill='tozeroy', line=dict(color='#ff0055')))
+        fig.update_layout(title="V-I Characteristics", xaxis_title="Voltage (V)", yaxis_title="Current (I)", template="plotly_dark")
+
+    st.plotly_chart(fig, use_container_width=True)
