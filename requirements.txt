@@ -40,3 +40,10 @@ plotly
 matplotlib 
 seaborn 
 mpld3 
+sentence-transformers 
+faiss-cpu 
+pytesseract 
+Pillow 
+PyPDF2 
+torch 
+torchvision 
