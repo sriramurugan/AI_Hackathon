@@ -36,3 +36,7 @@ torchvision
 sympy 
 scipy 
 matplotlib 
+plotly 
+matplotlib 
+seaborn 
+mpld3 
