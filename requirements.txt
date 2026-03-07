@@ -33,3 +33,6 @@ Pillow
 PyPDF2 
 torch 
 torchvision 
+sympy 
+scipy 
+matplotlib 
