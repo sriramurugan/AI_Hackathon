@@ -22,3 +22,7 @@ plotly
 
 plotly 
 plotly 
+plotly 
+pandas 
+numpy 
+sympy 
