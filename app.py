@@ -1,102 +1,69 @@
 import streamlit as st
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import sympy as sp
-import torch
-import pytesseract
-import PyPDF2
-import faiss
-import re
 from groq import Groq
-from PIL import Image
-from sentence_transformers import SentenceTransformer
+import matplotlib.pyplot as plt
+import numpy as np
 
-# ---------------------------------
-# PAGE CONFIG
-# ---------------------------------
-st.set_page_config(page_title="NCERT Hybrid AI Tutor", page_icon="📚", layout="wide")
+# 1. Page Configuration
+st.set_page_config(page_title="NCERT Hybrid AI Tutor", page_icon="📚")
 st.title("📚 NCERT Hybrid AI Learning Tutor")
 
-# SECURE API KEY
-try:
-    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-except:
-    # Fallback for local testing if secrets.toml isn't set up
-    GROQ_API_KEY = "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"
+# 2. Secure API Key Loading
+# This looks in Streamlit Secrets (Cloud) or environment variables
+if "GROQ_API_KEY" not in st.secrets:
+    st.error("Missing GROQ_API_KEY in Streamlit Secrets!")
+    st.stop()
 
-# LOAD MODELS
-@st.cache_resource
-def load_models():
-    client = Groq(api_key=GROQ_API_KEY)
-    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-    return client, embed_model
+# 3. Initialize the Groq Client
+client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-groq_client, embed_model = load_models()
+# 4. Initialize CHAT MEMORY (The Notebook)
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "system", "content": "You are a helpful NCERT Science and Math tutor. Use clear examples."}
+    ]
 
-# SESSION STATE
-if "messages" not in st.session_state: st.session_state.messages = []
-if "docs" not in st.session_state: st.session_state.docs = []
-if "doc_vectors" not in st.session_state: st.session_state.doc_vectors = None
+# 5. Display the Chat History (so words don't disappear)
+for message in st.session_state.messages:
+    if message["role"] != "system":
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-# FUNCTIONS (Math, Graph, RAG)
-def solve_math(prompt):
+# 6. The "Chat Input" and AI Logic
+if prompt := st.chat_input("Ask me a science or math question..."):
+    # Show user message
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    # Save user message to memory
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # Call Groq with the ENTIRE history (This gives it memory!)
     try:
-        equation_str = re.split(r'solve', prompt, flags=re.IGNORECASE)[-1].strip()
-        x = sp.symbols('x')
-        solution = sp.solve(equation_str, x)
-        return f"### ✅ SymPy Math Result:\nFor the equation ${equation_str}$, $x = {solution}$"
-    except: return "Could not solve math."
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=st.session_state.messages, # Sending the whole notebook!
+            temperature=0.7,
+        )
+        
+        response = completion.choices[0].message.content
+        
+        # Show assistant response
+        with st.chat_message("assistant"):
+            st.markdown(response)
+        
+        # Save assistant response to memory
+        st.session_state.messages.append({"role": "assistant", "content": response})
 
-def graph_equation(expr):
-    x_vals = np.linspace(-10, 10, 400)
-    try:
-        clean_expr = expr.replace('^', '**')
-        y_vals = eval(clean_expr, {"np": np, "x": x_vals})
-        fig, ax = plt.subplots()
-        ax.plot(x_vals, y_vals)
-        return fig
-    except: return None
+    except Exception as e:
+        st.error(f"Groq API Error: {e}")
 
-# ---------------------------------
-# SIDEBAR
-# ---------------------------------
+# 7. Sidebar for Visualization (Fixing Matplotlib)
 with st.sidebar:
-    st.header("📂 Upload Material")
-    uploaded_file = st.file_uploader("PDF or Image", type=["pdf", "png", "jpg"])
-    if uploaded_file:
-        st.success("File Processed!")
-
-# ---------------------------------
-# CHAT INTERFACE
-# ---------------------------------
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]): st.write(msg["content"])
-
-user_prompt = st.chat_input("Ask a question...")
-
-if user_prompt:
-    st.session_state.messages.append({"role": "user", "content": user_prompt})
-    with st.chat_message("user"): st.write(user_prompt)
-
-    with st.chat_message("assistant"):
-        if "solve" in user_prompt.lower():
-            answer = solve_math(user_prompt)
-            st.write(answer)
-            st.balloons() # 🎉 Celebration for solving math!
-        elif "plot" in user_prompt.lower():
-            match = re.search(r"plot\s+(.*)", user_prompt)
-            if match:
-                fig = graph_equation(match.group(1))
-                if fig: st.pyplot(fig)
-            answer = "Graph generated!"
-        else:
-            response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": user_prompt}]
-            )
-            answer = response.choices[0].message.content
-            st.write(answer)
-            if len(answer) > 100: st.balloons() # 🎉 Celebration for long explanations!
-
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.header("Visual Tools")
+    if st.button("Generate Science Graph"):
+        fig, ax = plt.subplots()
+        x = np.linspace(0, 10, 100)
+        y = np.sin(x)
+        ax.plot(x, y, color='green')
+        ax.set_title("Visualizing a Sine Wave (Physics)")
+        st.pyplot(fig) # Correct way to show matplotlib in Streamlit
