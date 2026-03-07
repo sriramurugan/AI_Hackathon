@@ -20,3 +20,4 @@ sympy
 transformers
 plotly
 
+plotly 
