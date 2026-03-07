@@ -8,7 +8,7 @@ import pytesseract
 import PyPDF2
 import faiss
 import re
-from groq import Groq  # Swapped Ollama for Groq for speed
+from groq import Groq
 from PIL import Image
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline
@@ -21,13 +21,21 @@ st.title("📚 NCERT Hybrid AI Learning Tutor")
 st.markdown("*Your intelligent companion for NCERT Science & Math*")
 
 # ---------------------------------
-# LOAD MODELS (Caching for i3 performance)
+# SECURE API KEY LOADING
+# ---------------------------------
+# This pulls the key from Streamlit Cloud's "Secrets" menu
+try:
+    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+except KeyError:
+    st.error("GROQ_API_KEY not found! Please add it to your Streamlit Cloud Secrets.")
+    st.stop()
+
+# ---------------------------------
+# LOAD MODELS (Cached)
 # ---------------------------------
 @st.cache_resource
 def load_models():
-    # Groq Client setup
-    client = Groq(api_key="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")
-    # Embedding model for RAG
+    client = Groq(api_key=GROQ_API_KEY)
     embed_model = SentenceTransformer("all-MiniLM-L6-v2")
     return client, embed_model
 
@@ -55,19 +63,16 @@ def detect_task(prompt):
 
 def solve_math(prompt):
     try:
-        # Extracts everything after 'solve'
         equation_str = re.split(r'solve', prompt, flags=re.IGNORECASE)[-1].strip()
         x = sp.symbols('x')
-        # Simple parsing for NCERT level algebra
         solution = sp.solve(equation_str, x)
         return f"### SymPy Math Result:\nFor the equation ${equation_str}$, the value of $x$ is: **{solution}**"
-    except Exception as e:
+    except:
         return f"I couldn't parse that math problem. Please try: 'solve x**2 - 4'"
 
 def graph_equation(expr):
     x_vals = np.linspace(-10, 10, 400)
     try:
-        # Security: replacing '^' with '**' for python eval
         clean_expr = expr.replace('^', '**')
         y_vals = eval(clean_expr, {"np": np, "x": x_vals, "sin": np.sin, "cos": np.cos, "tan": np.tan, "sqrt": np.sqrt})
         fig, ax = plt.subplots()
@@ -105,7 +110,6 @@ with st.sidebar:
                 image = Image.open(uploaded_file)
                 text_data = pytesseract.image_to_string(image)
 
-            # Chunking and Vectorizing
             chunks = [text_data[i:i+500] for i in range(0, len(text_data), 500)]
             embeddings = embed_model.encode(chunks)
             dim = embeddings.shape[1]
@@ -114,7 +118,7 @@ with st.sidebar:
             
             st.session_state.docs = chunks
             st.session_state.doc_vectors = index
-            st.success("Context loaded! Ask me anything about this file.")
+            st.success("Context loaded!")
 
 # ---------------------------------
 # MAIN CHAT INTERFACE
@@ -123,7 +127,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-user_prompt = st.chat_input("Ask a question, e.g., 'What is Photosynthesis?' or 'plot x**2'")
+user_prompt = st.chat_input("Ask a question about your study material...")
 
 if user_prompt:
     st.chat_message("user").write(user_prompt)
@@ -135,7 +139,6 @@ if user_prompt:
         if task == "math":
             answer = solve_math(user_prompt)
             st.write(answer)
-        
         elif task == "graph":
             match = re.search(r"(?:plot|graph)\s+(.*)", user_prompt, re.IGNORECASE)
             if match:
@@ -144,12 +147,10 @@ if user_prompt:
                 if fig:
                     st.pyplot(fig)
                     answer = f"Generated graph for ${expr}$"
-                else: answer = "Could not plot that. Check the formula!"
+                else: answer = "Could not plot that."
             else: answer = "Try: 'plot x**2'"
             st.write(answer)
-            
         else:
-            # LLM + RAG logic using Groq
             context = retrieve_context(user_prompt)
             full_prompt = f"Context: {context}\n\nQuestion: {user_prompt}\n\nHelp the student understand step-by-step."
             
@@ -161,7 +162,7 @@ if user_prompt:
                 answer = response.choices[0].message.content
                 st.write(answer)
             except Exception as e:
-                st.error("Groq connection error. Check your API key!")
-                answer = "Error connecting to AI."
+                st.error("Error connecting to AI.")
+                answer = "Error."
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
