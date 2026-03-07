@@ -26,3 +26,10 @@ plotly
 pandas 
 numpy 
 sympy 
+sentence-transformers 
+faiss-cpu 
+pytesseract 
+Pillow 
+PyPDF2 
+torch 
+torchvision 
