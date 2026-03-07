@@ -7,283 +7,161 @@ import torch
 import pytesseract
 import PyPDF2
 import faiss
-import ollama
-
+import re
+from groq import Groq  # Swapped Ollama for Groq for speed
 from PIL import Image
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline
-from sklearn.metrics.pairwise import cosine_similarity
 
-# ------------------------------
-# PAGE CONFIG
-# ------------------------------
+# ---------------------------------
+# PAGE CONFIG & STYLING
+# ---------------------------------
+st.set_page_config(page_title="NCERT Hybrid AI Tutor", page_icon="📚", layout="wide")
+st.title("📚 NCERT Hybrid AI Learning Tutor")
+st.markdown("*Your intelligent companion for NCERT Science & Math*")
 
-st.set_page_config(
-    page_title="AI Hybrid Tutor",
-    page_icon="📚",
-    layout="wide"
-)
-
-st.title("📚 Hybrid AI Learning Tutor")
-
-# ------------------------------
-# LOAD MODELS
-# ------------------------------
-
+# ---------------------------------
+# LOAD MODELS (Caching for i3 performance)
+# ---------------------------------
 @st.cache_resource
 def load_models():
-
+    # Groq Client setup
+    client = Groq(api_key="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")
+    # Embedding model for RAG
     embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return client, embed_model
 
-    sentiment = pipeline(
-        "sentiment-analysis",
-        model="distilbert-base-uncased-finetuned-sst-2-english"
-    )
+groq_client, embed_model = load_models()
 
-    return embed_model, sentiment
-
-
-embed_model, sentiment_model = load_models()
-
-# ------------------------------
+# ---------------------------------
 # SESSION STATE
-# ------------------------------
-
+# ---------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
-
 if "docs" not in st.session_state:
     st.session_state.docs = []
-
 if "doc_vectors" not in st.session_state:
     st.session_state.doc_vectors = None
 
-
-# ------------------------------
-# TOOL ROUTER
-# ------------------------------
+# ---------------------------------
+# LOGIC FUNCTIONS
+# ---------------------------------
 
 def detect_task(prompt):
-
     p = prompt.lower()
-
-    if any(x in p for x in ["graph", "plot", "chart", "visualize"]):
-        return "graph"
-
-    if any(x in p for x in ["solve", "equation", "calculate"]):
-        return "math"
-
-    if any(x in p for x in ["pdf", "document", "chapter"]):
-        return "rag"
-
+    if any(x in p for x in ["plot", "graph", "draw"]): return "graph"
+    if any(x in p for x in ["solve", "equation", "integrate", "differentiate"]): return "math"
     return "chat"
 
-
-# ------------------------------
-# MATH SOLVER
-# ------------------------------
-
 def solve_math(prompt):
-
     try:
+        # Extracts everything after 'solve'
+        equation_str = re.split(r'solve', prompt, flags=re.IGNORECASE)[-1].strip()
+        x = sp.symbols('x')
+        # Simple parsing for NCERT level algebra
+        solution = sp.solve(equation_str, x)
+        return f"### SymPy Math Result:\nFor the equation ${equation_str}$, the value of $x$ is: **{solution}**"
+    except Exception as e:
+        return f"I couldn't parse that math problem. Please try: 'solve x**2 - 4'"
 
-        expr = prompt.split("solve")[-1]
-
-        x = sp.symbols("x")
-
-        solution = sp.solve(expr, x)
-
-        return f"Solution: {solution}"
-
+def graph_equation(expr):
+    x_vals = np.linspace(-10, 10, 400)
+    try:
+        # Security: replacing '^' with '**' for python eval
+        clean_expr = expr.replace('^', '**')
+        y_vals = eval(clean_expr, {"np": np, "x": x_vals, "sin": np.sin, "cos": np.cos, "tan": np.tan, "sqrt": np.sqrt})
+        fig, ax = plt.subplots()
+        ax.plot(x_vals, y_vals, color='royalblue', linewidth=2)
+        ax.axhline(0, color='black', lw=1)
+        ax.axvline(0, color='black', lw=1)
+        ax.grid(True, linestyle='--', alpha=0.6)
+        ax.set_title(f"Graph of y = {expr}")
+        return fig
     except:
-
-        return "Could not solve equation."
-
-
-# ------------------------------
-# GRAPH GENERATOR
-# ------------------------------
-
-def generate_graph():
-
-    x = np.linspace(0, 20, 100)
-
-    y = 2*x + 5
-
-    fig, ax = plt.subplots()
-
-    ax.plot(x, y)
-
-    ax.set_xlabel("X")
-
-    ax.set_ylabel("Y")
-
-    ax.set_title("Linear Relationship")
-
-    return fig
-
-
-# ------------------------------
-# RAG RETRIEVAL
-# ------------------------------
+        return None
 
 def retrieve_context(query):
-
-    if st.session_state.doc_vectors is None:
+    if st.session_state.doc_vectors is None or not st.session_state.docs:
         return ""
-
     q_emb = embed_model.encode([query])
-
-    D, I = st.session_state.doc_vectors.search(
-        np.array(q_emb).astype("float32"), 3
-    )
-
-    context = ""
-
-    for idx in I[0]:
-
-        context += st.session_state.docs[idx]
-
+    D, I = st.session_state.doc_vectors.search(np.array(q_emb).astype("float32"), 3)
+    context = "\n".join([st.session_state.docs[idx] for idx in I[0] if idx != -1])
     return context
 
+# ---------------------------------
+# SIDEBAR: FILE PROCESSING
+# ---------------------------------
+with st.sidebar:
+    st.header("📂 Study Materials")
+    uploaded_file = st.file_uploader("Upload NCERT PDF/Image", type=["pdf", "png", "jpg", "jpeg"])
 
-# ------------------------------
-# SIDEBAR FILE UPLOAD
-# ------------------------------
+    if uploaded_file:
+        with st.spinner("Indexing your material..."):
+            text_data = ""
+            if uploaded_file.type == "application/pdf":
+                reader = PyPDF2.PdfReader(uploaded_file)
+                text_data = "".join([page.extract_text() for page in reader.pages])
+            else:
+                image = Image.open(uploaded_file)
+                text_data = pytesseract.image_to_string(image)
 
-st.sidebar.header("Upload Learning Material")
+            # Chunking and Vectorizing
+            chunks = [text_data[i:i+500] for i in range(0, len(text_data), 500)]
+            embeddings = embed_model.encode(chunks)
+            dim = embeddings.shape[1]
+            index = faiss.IndexFlatL2(dim)
+            index.add(np.array(embeddings).astype("float32"))
+            
+            st.session_state.docs = chunks
+            st.session_state.doc_vectors = index
+            st.success("Context loaded! Ask me anything about this file.")
 
-uploaded_file = st.sidebar.file_uploader(
-    "Upload PDF / Image / CSV",
-    type=["pdf", "png", "jpg", "jpeg", "csv"]
-)
-
-# ------------------------------
-# FILE PROCESSING
-# ------------------------------
-
-if uploaded_file:
-
-    if uploaded_file.type == "application/pdf":
-
-        reader = PyPDF2.PdfReader(uploaded_file)
-
-        text = ""
-
-        for page in reader.pages:
-            text += page.extract_text()
-
-        chunks = [text[i:i+500] for i in range(0, len(text), 500)]
-
-        embeddings = embed_model.encode(chunks)
-
-        dim = embeddings.shape[1]
-
-        index = faiss.IndexFlatL2(dim)
-
-        index.add(np.array(embeddings).astype("float32"))
-
-        st.session_state.docs = chunks
-        st.session_state.doc_vectors = index
-
-        st.sidebar.success("PDF processed")
-
-    elif uploaded_file.type.startswith("image"):
-
-        image = Image.open(uploaded_file)
-
-        text = pytesseract.image_to_string(image)
-
-        chunks = [text]
-
-        embeddings = embed_model.encode(chunks)
-
-        dim = embeddings.shape[1]
-
-        index = faiss.IndexFlatL2(dim)
-
-        index.add(np.array(embeddings).astype("float32"))
-
-        st.session_state.docs = chunks
-        st.session_state.doc_vectors = index
-
-        st.sidebar.success("Image processed")
-
-    elif uploaded_file.type == "text/csv":
-
-        df = pd.read_csv(uploaded_file)
-
-        st.write("Dataset preview")
-
-        st.dataframe(df)
-
-
-# ------------------------------
-# CHAT DISPLAY
-# ------------------------------
-
+# ---------------------------------
+# MAIN CHAT INTERFACE
+# ---------------------------------
 for msg in st.session_state.messages:
-
     with st.chat_message(msg["role"]):
-
         st.write(msg["content"])
 
-
-# ------------------------------
-# USER INPUT
-# ------------------------------
-
-user_prompt = st.chat_input("Ask anything about studies")
+user_prompt = st.chat_input("Ask a question, e.g., 'What is Photosynthesis?' or 'plot x**2'")
 
 if user_prompt:
-
-    st.session_state.messages.append({
-        "role": "user",
-        "content": user_prompt
-    })
+    st.chat_message("user").write(user_prompt)
+    st.session_state.messages.append({"role": "user", "content": user_prompt})
 
     task = detect_task(user_prompt)
+    
+    with st.chat_message("assistant"):
+        if task == "math":
+            answer = solve_math(user_prompt)
+            st.write(answer)
+        
+        elif task == "graph":
+            match = re.search(r"(?:plot|graph)\s+(.*)", user_prompt, re.IGNORECASE)
+            if match:
+                expr = match.group(1)
+                fig = graph_equation(expr)
+                if fig:
+                    st.pyplot(fig)
+                    answer = f"Generated graph for ${expr}$"
+                else: answer = "Could not plot that. Check the formula!"
+            else: answer = "Try: 'plot x**2'"
+            st.write(answer)
+            
+        else:
+            # LLM + RAG logic using Groq
+            context = retrieve_context(user_prompt)
+            full_prompt = f"Context: {context}\n\nQuestion: {user_prompt}\n\nHelp the student understand step-by-step."
+            
+            try:
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": full_prompt}]
+                )
+                answer = response.choices[0].message.content
+                st.write(answer)
+            except Exception as e:
+                st.error("Groq connection error. Check your API key!")
+                answer = "Error connecting to AI."
 
-    if task == "math":
-
-        answer = solve_math(user_prompt)
-
-    elif task == "graph":
-
-        fig = generate_graph()
-
-        st.pyplot(fig)
-
-        answer = "Graph generated."
-
-    else:
-
-        context = retrieve_context(user_prompt)
-
-        prompt = f"""
-You are a professional tutor.
-
-Explain clearly.
-
-Context:
-{context}
-
-Question:
-{user_prompt}
-
-Answer step by step.
-"""
-
-        response = ollama.chat(
-            model="tinyllama",
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        answer = response["message"]["content"]
-
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": answer
-    })
-
-    st.rerun()
+    st.session_state.messages.append({"role": "assistant", "content": answer})
