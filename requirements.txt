@@ -18,5 +18,5 @@ pytesseract
 PyPDF2
 sympy
 transformers
-
+plotly
 
