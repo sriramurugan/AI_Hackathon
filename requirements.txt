@@ -1,7 +1,8 @@
 streamlit 
-numpy 
-faiss-cpu 
 groq 
+numpy 
+pandas 
+plotly 
+faiss-cpu 
 PyPDF2 
 sentence-transformers 
-matplotlib 
