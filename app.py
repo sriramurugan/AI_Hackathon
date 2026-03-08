@@ -12,22 +12,17 @@ from sentence_transformers import SentenceTransformer
 import faiss
 import sympy as sp
 import re
+import networkx as nx
 
 # 1. PAGE CONFIG & NEON THEME
-st.set_page_config(page_title="Omni-NCERT Neural Engine", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="Omni-Neural Discovery Engine", page_icon="🕸️", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background: #05070a; color: #e0e6ed; }
     h1 { background: linear-gradient(90deg, #00ffcc, #0088ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; }
-    .formula-box { 
-        background: linear-gradient(90deg, #1f2937, #111827); 
-        border-left: 5px solid #00ffcc; 
-        padding: 15px; border-radius: 10px; margin-bottom: 20px;
-        color: #00ffcc; font-family: 'Courier New', Courier, monospace;
-        box-shadow: 0 4px 15px rgba(0, 255, 204, 0.2);
-    }
-    .stChatMessage { border: 1px solid #1f2937; border-radius: 15px; background: #0d1117; }
+    .stChatMessage { border: 1px solid #1f2937; border-radius: 15px; background: #0d1117; margin-bottom: 10px; }
+    .feedback-btn { border-radius: 20px; border: 1px solid #00ffcc; background: transparent; color: #00ffcc; padding: 2px 10px; font-size: 0.8rem; cursor: pointer; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -40,74 +35,97 @@ def load_assets():
 
 client, embedder = load_assets()
 
-# 3. GLOBAL STATE
+# IteratorsHQ Principle: Data Cleaning Layer
+def clean_text_data(text):
+    text = re.sub(r'\s+', ' ', text) # Remove extra whitespace
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text) # Remove non-ascii noise
+    return text.strip()
+
+# 3. GLOBAL STATE (Long-Term Memory + Graph Storage)
 if "chats" not in st.session_state:
-    st.session_state.chats = {str(uuid.uuid4()): {"title": "Main Brain", "messages": [], "db": None, "chunks": []}}
+    st.session_state.chats = {
+        str(uuid.uuid4()): {
+            "messages": [], 
+            "db": None, 
+            "chunks": [], 
+            "graph": nx.Graph(),
+            "quality_feedback": []
+        }
+    }
     st.session_state.active_id = list(st.session_state.chats.keys())[0]
 
-# --- SIDEBAR: KNOWLEDGE INDEXING ---
+# --- SIDEBAR: KNOWLEDGE PIPELINE (GraphRAG + Quality Check) ---
 with st.sidebar:
-    st.title("🧬 Neural Archive")
-    if st.button("➕ New Session"):
+    st.title("🕸️ Discovery Archive")
+    if st.button("➕ New Neural Session"):
         new_id = str(uuid.uuid4())
-        st.session_state.chats[new_id] = {"title": "New Session", "messages": [], "db": None, "chunks": []}
+        st.session_state.chats[new_id] = {"messages": [], "db": None, "chunks": [], "graph": nx.Graph(), "quality_feedback": []}
         st.session_state.active_id = new_id
         st.rerun()
 
-    uploaded_files = st.file_uploader("📂 Upload NCERT Data", type=["pdf", "png", "jpg"], accept_multiple_files=True)
-    if st.button("🏗️ Index Knowledge") and uploaded_files:
-        with st.spinner("Analyzing Deeply..."):
+    uploaded_files = st.file_uploader("📂 Data Ingestion (PDF/Images)", type=["pdf", "png", "jpg"], accept_multiple_files=True)
+    if st.button("🏗️ Build Knowledge Graph") and uploaded_files:
+        with st.spinner("IteratorsHQ-Style Cleaning & GraphRAG Indexing..."):
             raw_text = ""
             for f in uploaded_files:
                 if f.type == "application/pdf":
                     pdf = PyPDF2.PdfReader(f)
-                    raw_text += "\n".join([p.extract_text() for p in pdf.pages if p.extract_text()])
+                    raw_text += "\n".join([clean_text_data(p.extract_text()) for p in pdf.pages if p.extract_text()])
                 else:
-                    raw_text += pytesseract.image_to_string(Image.open(f))
+                    raw_text += clean_text_data(pytesseract.image_to_string(Image.open(f)))
             
-            chunks = [raw_text[i:i+800] for i in range(0, len(raw_text), 800)]
-            if chunks:
-                embeddings = embedder.encode(chunks)
-                index = faiss.IndexFlatL2(embeddings.shape[1])
-                index.add(np.array(embeddings).astype('float32'))
-                st.session_state.chats[st.session_state.active_id]["db"] = index
-                st.session_state.chats[st.session_state.active_id]["chunks"] = chunks
-                st.success("Knowledge Synced!")
+            # Semantic Indexing (Vector)
+            chunks = [raw_text[i:i+600] for i in range(0, len(raw_text), 600)]
+            embeddings = embedder.encode(chunks)
+            index = faiss.IndexFlatL2(embeddings.shape[1])
+            index.add(np.array(embeddings).astype('float32'))
+            
+            # Relationship Indexing (Microsoft GraphRAG Style)
+            G = nx.Graph()
+            for chunk in chunks[:15]: # Process chunks for relationship discovery
+                entities = re.findall(r'\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b', chunk)
+                for i in range(len(entities)-1):
+                    G.add_edge(entities[i], entities[i+1])
+            
+            st.session_state.chats[st.session_state.active_id]["db"] = index
+            st.session_state.chats[st.session_state.active_id]["chunks"] = chunks
+            st.session_state.chats[st.session_state.active_id]["graph"] = G
+            st.success("Discovery Engine Ready!")
 
 # --- MAIN INTERFACE ---
 aid = st.session_state.active_id
 active_chat = st.session_state.chats[aid]
-tab_chat, tab_lab = st.tabs(["💬 AI Tutor Console", "📊 Pro Visual Lab"])
+tab_chat, tab_map = st.tabs(["💬 Augmented Intelligence", "🕸️ Knowledge Graph"])
 
 with tab_chat:
-    for m in active_chat["messages"]:
-        with st.chat_message(m["role"]): st.markdown(m["content"], unsafe_allow_html=True)
+    for i, m in enumerate(active_chat["messages"]):
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"], unsafe_allow_html=True)
+            if m["role"] == "assistant":
+                if st.button("👍 Correct", key=f"up_{i}"): st.toast("Quality Label: Positive")
+                if st.button("👎 Wrong", key=f"dn_{i}"): st.toast("Quality Label: Negative")
 
-    if prompt := st.chat_input("Ask a question or request a graph machi..."):
+    if prompt := st.chat_input("Analyze, Solve, or Visualize..."):
         active_chat["messages"].append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
 
-        # RAG Context Retrieval
+        # 1. RETRIEVAL (Vector Similarity + Relation Context)
         context = ""
         if active_chat["db"]:
-            q_emb = embedder.encode([prompt])
-            _, I = active_chat["db"].search(np.array(q_emb).astype('float32'), k=5)
+            _, I = active_chat["db"].search(np.array(embedder.encode([prompt])).astype('float32'), k=4)
             context = "\n".join([active_chat["chunks"][i] for i in I[0]])
 
-        # 🧠 THE "ULTIMATE UNLOCK" MASTER PROMPT
-        sys_msg = f"""You are the Omni-NCERT Neural Engine, a Senior Scientist for 6th-12th Std. 
+        # 2. THE MASTER SYSTEM PROMPT (Combines Microsoft GraphRAG + IteratorsHQ Quality + NCERT Tutor)
+        sys_msg = f"""You are the Omni-Neural Engine. You use Microsoft GraphRAG logic for discovery and follow IteratorsHQ principles for data quality.
         
-        IMPORTANT CAPABILITIES:
-        1. PDF/IMAGE ACCESS: You CAN see the content of uploaded files. The context provided below is extracted directly from the user's files:
-           CONTEXT: {context}
+        KNOWLEDGE CONTEXT: {context}
         
-        2. DYNAMIC GRAPHING: You HAVE the power to render interactive Plotly graphs. Never say "I cannot display images" or "I am a text model".
-        
-        RULES:
-        1. Speak in friendly Tanglish (Machi, Vada, Puriyudha).
-        2. STEP-BY-STEP: Whatever the question, explain the logic step-by-step first for students.
-        3. TRIGGER CODE: If a graph/visualization is needed, you MUST write Python code in a ```python ... ``` block and assign the result to the variable 'fig'.
-        4. Use 'px' or 'go' from plotly for all charts.
+        INSTRUCTIONS:
+        1. Speak in friendly Tanglish (Machi, Vada).
+        2. PEDAGOGY: Solve any 6th-12th NCERT problem step-by-step.
+        3. DISCOVERY: Explain not just the answer, but the RELATIONSHIPS between concepts in the context.
+        4. DYNAMIC VISUALS: If a graph/3D plot is needed, write Plotly code in a ```python ... ``` block. Use 'fig' as the variable name.
+        5. If context is 'Garbage' or missing, ask the user to upload clean data.
         """
 
         try:
@@ -120,22 +138,22 @@ with tab_chat:
             
             with st.chat_message("assistant"):
                 st.markdown(ans, unsafe_allow_html=True)
-                
-                # Dynamic Execution Logic
                 code_match = re.search(r'```python\n(.*?)\n```', ans, re.DOTALL)
                 if code_match:
-                    code_str = code_match.group(1)
                     local_vars = {'np': np, 'go': go, 'px': px, 'sp': sp, 'pd': pd, 'fig': None}
-                    try:
-                        exec(code_str, globals(), local_vars)
-                        if local_vars.get('fig') is not None:
-                            st.plotly_chart(local_vars['fig'], use_container_width=True)
-                    except Exception as exec_err:
-                        st.error(f"Execution Error: {exec_err}")
+                    exec(code_match.group(1), globals(), local_vars)
+                    if local_vars['fig']: st.plotly_chart(local_vars['fig'])
             st.rerun()
-        except Exception as e:
-            st.error(f"Brain Sync Error: {e}")
+        except Exception as e: st.error(f"Engine Fault: {e}")
 
-with tab_lab:
-    st.header("🔬 3D Lab Simulation")
-    st.info("Ask the AI in the chat tab to generate a specific 3D structure or graph, and it will appear here dynamically!")
+with tab_map:
+    st.header("🕸️ Neural Concept Map (GraphRAG View)")
+    G = active_chat["graph"]
+    if len(G.nodes) > 0:
+        pos = nx.spring_layout(G)
+        node_trace = go.Scatter(x=[pos[n][0] for n in G.nodes()], y=[pos[n][1] for n in G.nodes()],
+                                mode='markers+text', text=list(G.nodes()), textposition="bottom center",
+                                marker=dict(size=12, color='#00ffcc'))
+        fig = go.Figure(data=[node_trace], layout=go.Layout(template="plotly_dark", showlegend=False))
+        st.plotly_chart(fig, use_container_width=True)
+    else: st.info("Machi, index knowledge to see the concept graph!")

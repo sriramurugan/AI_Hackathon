@@ -10,4 +10,5 @@ faiss-cpu
 pytesseract 
 Pillow 
 PyPDF2 
-torch
+torch 
+networkx
