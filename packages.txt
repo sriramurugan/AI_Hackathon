@@ -1,3 +1,7 @@
 tesseract-ocr 
 libtesseract-dev 
 libgl1
+libgl1-mesa-glx
+openssl
+libssl-dev
+ca-certificates
