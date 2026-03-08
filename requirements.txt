@@ -4,5 +4,4 @@ numpy
 faiss-cpu 
 PyPDF2 
 sentence-transformers 
-networkx 
-plotly
+matplotlib 
