@@ -1,7 +1,7 @@
 streamlit 
-groq 
 numpy 
 faiss-cpu 
+groq 
 PyPDF2 
 sentence-transformers 
 matplotlib 
