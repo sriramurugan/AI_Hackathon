@@ -1,8 +1,8 @@
-tesseract-ocr
-libtesseract-dev
-libgl1
-libglx-mesa0
-libegl1-mesa
-openssl
-libssl-dev
+tesseract-ocr 
+libtesseract-dev 
+libgl1 
+libglx-mesa0 
+libegl1 
+openssl 
+libssl-dev 
 ca-certificates
