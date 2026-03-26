@@ -1,4 +1,4 @@
-streamlit==1.32.0
+streamlit==1.54.0
 packaging<24
 groq
 faiss-cpu
